@@ -1,0 +1,79 @@
+name: Build, Push, and Update Manifests
+
+on:
+  push:
+    branches:
+      - UI
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/mlops-ui
+
+jobs:
+  build-and-update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout UI Branch
+        uses: actions/checkout@v4
+        with:
+          ref: UI
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set Image Tag
+        id: vars
+        # Use the first 7 characters of the Git commit SHA as the Docker tag
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          # Converts repository name to lowercase automatically to prevent Docker errors
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.sha_short }}
+
+      - name: Checkout ArgoCD Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ArgoCD # Switch to the manifest branch
+          path: argocd-branch # Clone it into a subfolder to avoid overriding the workspace
+
+      - name: Update Kubernetes Manifests
+        run: |
+          cd argocd-branch/UI
+          
+          # Convert image name to lowercase for GHCR format matching
+          LOWER_IMAGE=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          NEW_IMAGE="${LOWER_IMAGE}:${{ steps.vars.outputs.sha_short }}"
+          
+          # Use sed to find and replace the image line in the deployment YAML
+          # This replaces both the FastAPI and Gradio container image lines
+          sed -i "s|image: ghcr.io/.*|image: ${NEW_IMAGE}|g" k8s-ui-backend.yaml
+          
+          echo "Updated k8s-ui-backend.yaml to use image: $NEW_IMAGE"
+
+      - name: Commit and Push Changes to ArgoCD Branch
+        run: |
+          cd argocd-branch
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add UI/k8s-ui-backend.yaml
+          
+          # Only commit if there are actual changes
+          if ! git diff-index --quiet HEAD; then
+            git commit -m "GitOps: Update UI image to ${{ steps.vars.outputs.sha_short }}"
+            git push origin ArgoCD
+          else
+            echo "No changes to commit."
+          fi
