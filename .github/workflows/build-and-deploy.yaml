@@ -29,35 +29,38 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set Image Tag
+      - name: Set Image Tag and Lowercase Repo Name
         id: vars
-        # Use the first 7 characters of the Git commit SHA as the Docker tag
-        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        run: |
+          # 1. Get the short SHA
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          
+          # 2. Force the GitHub repository string to lowercase
+          LOWER_REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "lower_repo=$LOWER_REPO" >> $GITHUB_OUTPUT
 
       - name: Build and Push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          # Converts repository name to lowercase automatically to prevent Docker errors
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.sha_short }}
+          # Use the newly lowercased repository string here!
+          tags: ${{ env.REGISTRY }}/${{ steps.vars.outputs.lower_repo }}/mlops-ui:${{ steps.vars.outputs.sha_short }}
 
       - name: Checkout ArgoCD Branch
         uses: actions/checkout@v4
         with:
-          ref: ArgoCD # Switch to the manifest branch
-          path: argocd-branch # Clone it into a subfolder to avoid overriding the workspace
+          ref: ArgoCD 
+          path: argocd-branch 
 
       - name: Update Kubernetes Manifests
         run: |
           cd argocd-branch/UI
           
-          # Convert image name to lowercase for GHCR format matching
-          LOWER_IMAGE=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
-          NEW_IMAGE="${LOWER_IMAGE}:${{ steps.vars.outputs.sha_short }}"
+          # Construct the exact image name we just pushed
+          NEW_IMAGE="${{ env.REGISTRY }}/${{ steps.vars.outputs.lower_repo }}/mlops-ui:${{ steps.vars.outputs.sha_short }}"
           
-          # Use sed to find and replace the image line in the deployment YAML
-          # This replaces both the FastAPI and Gradio container image lines
+          # Replace it in the YAML
           sed -i "s|image: ghcr.io/.*|image: ${NEW_IMAGE}|g" k8s-ui-backend.yaml
           
           echo "Updated k8s-ui-backend.yaml to use image: $NEW_IMAGE"
@@ -70,7 +73,6 @@ jobs:
           
           git add UI/k8s-ui-backend.yaml
           
-          # Only commit if there are actual changes
           if ! git diff-index --quiet HEAD; then
             git commit -m "GitOps: Update UI image to ${{ steps.vars.outputs.sha_short }}"
             git push origin ArgoCD
