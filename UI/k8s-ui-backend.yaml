@@ -1,0 +1,83 @@
+# ==========================================
+# 1. FastAPI Backend (The API Gateway)
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+      - name: fastapi
+        image: ghcr.io/4567893456789034567890/mlops-api:v1
+        # Tell Kubernetes to boot the FastAPI server
+        command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+        ports:
+        - containerPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: default
+spec:
+  selector:
+    app: api-gateway
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+
+---
+# ==========================================
+# 2. Gradio Frontend (The UI)
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gradio-ui
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gradio-ui
+  template:
+    metadata:
+      labels:
+        app: gradio-ui
+    spec:
+      containers:
+      - name: gradio
+        image: ghcr.io/4567893456789034567890/mlops-api:v1
+        # Tell Kubernetes to boot the Gradio server
+        command: ["python3", "gradio_app.py"]
+        env:
+        # Point the UI to the FastAPI internal Service DNS
+        - name: API_URL
+          value: "http://api-gateway:8000/predict"
+        ports:
+        - containerPort: 7860
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gradio-ui
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    app: gradio-ui
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 7860
