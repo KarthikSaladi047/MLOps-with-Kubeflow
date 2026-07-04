@@ -64,7 +64,7 @@ async def predict(request: InferenceRequest):
     score = outputs[1]["data"][0]
 
     # D. Business Logic: Translate the raw label into human-readable text
-    sentiment = "Positive" if raw_label == "LABEL_1" else "Negative"
+    sentiment = "Negative" if raw_label == "LABEL_0" else "Positive" if raw_label == "LABEL_1" else "Neutral"
 
     # E. Return a clean, user-friendly JSON response
     return InferenceResponse(
