@@ -6,12 +6,14 @@ metadata:
 spec:
   predictor:
     # 1. The Stable Model (Version 1) gets 90% of traffic
+    serviceAccountName: kserve-sa
     model:
       modelFormat:
         name: mlflow
       storageUri: "s3://mlflow-artifacts/1/ceb3f060cf7a4312826ad347885407e8/artifacts/model"
     # 2. The Canary Model (Version 2) gets 10% of traffic
     canaryTrafficPercent: 10
+    serviceAccountName: kserve-sa
     canary:
       modelFormat:
         name: mlflow
