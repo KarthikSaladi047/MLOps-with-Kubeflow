@@ -1,19 +1,17 @@
-apiVersion: "serving.kserve.io/v1beta1"
-kind: "InferenceService"
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
 metadata:
-  name: "huggingface-classifier"
+  name: huggingface-classifier
   namespace: default
 spec:
   predictor:
     serviceAccountName: kserve-sa
-    # 1. The Stable Model (Version 1) gets 90% of traffic
     model:
       modelFormat:
         name: mlflow
-      storageUri: "s3://mlflow-artifacts/1/ceb3f060cf7a4312826ad347885407e8/artifacts/model"
-    # 2. The Canary Model (Version 2) gets 10% of traffic
+      storageUri: s3://mlflow-artifacts/1/d655616c239542ef83d4e3997009f863/artifacts/model
     canaryTrafficPercent: 10
     canary:
       modelFormat:
         name: mlflow
-      storageUri: "s3://mlflow-artifacts/1/ceb3f060cf7a4312826ad347885407e8/artifacts/model"
+      storageUri: s3://mlflow-artifacts/1/ceb3f060cf7a4312826ad347885407e8/artifacts/model
