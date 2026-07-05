@@ -162,5 +162,5 @@ def mlops_pipeline():
 if __name__ == "__main__":
     compiler.Compiler().compile(
         pipeline_func=mlops_pipeline,
-        package_path="hf_pipeline_v2.yaml"
+        package_path="hf_pipeline_v3.yaml"
     )
