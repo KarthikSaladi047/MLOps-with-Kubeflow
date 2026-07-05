@@ -5,8 +5,8 @@ metadata:
   namespace: default
 spec:
   predictor:
-    # 1. The Stable Model (Version 1) gets 90% of traffic
     serviceAccountName: kserve-sa
+    # 1. The Stable Model (Version 1) gets 90% of traffic
     model:
       modelFormat:
         name: mlflow
