@@ -113,6 +113,11 @@ def train_and_register(dataset: dsl.Input[dsl.Dataset]):
     # 5. Log to MLflow Registry
     mlflow.set_experiment("huggingface-text-classification")
     with mlflow.start_run():
+        mlflow.log_param("epochs", epochs)
+        mlflow.log_param("batch_size", 16)
+        mlflow.log_param("learning_rate", 5e-5)
+        mlflow.log_metric("final_loss", avg_loss)
+        
         components = {"model": model, "tokenizer": tokenizer}
         mlflow.transformers.log_model(
             transformers_model=components,
