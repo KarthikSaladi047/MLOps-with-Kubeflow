@@ -131,7 +131,7 @@ def train_and_register(dataset: dsl.Input[dsl.Dataset]):
 # Pipeline Definition
 # ==========================================
 @dsl.pipeline(
-    name="enterprise-mlops-pipeline",
+    name="enterprise-text-classification-pipeline",
     description="Pulls a dataset via DVC/Git, trains, and registers a model."
 )
 def mlops_pipeline():
@@ -167,5 +167,5 @@ def mlops_pipeline():
 if __name__ == "__main__":
     compiler.Compiler().compile(
         pipeline_func=mlops_pipeline,
-        package_path="hf_pipeline_v3.yaml"
+        package_path="hf_pipeline.yaml"
     )
