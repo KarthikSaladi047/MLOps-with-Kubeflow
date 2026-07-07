@@ -150,7 +150,7 @@ def mlops_pipeline():
     data_task = prep_data()
     kubernetes.use_secret_as_env(
         data_task,
-        secret_name="prod-infra-credentials",
+        secret_name="infra-credentials",
         secret_key_to_env=secret_mapping
     )
     
@@ -158,7 +158,7 @@ def mlops_pipeline():
     train_task = train_and_register(dataset=data_task.outputs["dataset"])
     kubernetes.use_secret_as_env(
         train_task,
-        secret_name="prod-infra-credentials",
+        secret_name="infra-credentials",
         secret_key_to_env=secret_mapping
     )
     
