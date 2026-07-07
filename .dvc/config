@@ -2,4 +2,4 @@
     remote = minio-remote
 ['remote "minio-remote"']
     url = s3://dvc-storage/dvc-store
-    endpointurl = http://10.13.195.46:30623
+    endpointurl = http://minio.minio.svc.cluster.local:9000
