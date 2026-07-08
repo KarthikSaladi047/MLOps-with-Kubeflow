@@ -131,27 +131,27 @@ A promotion in the MLflow registry eventually becomes a rolled-out
 `InferenceService`.
 
 ```
-    ╭─────────────╮                              ╭──────────────╮      git commit + push
-    │   MLflow    │◀── poll every 30 min ────── │   CD Cron    │─────────────────────────▶╭──────────────╮
-    │   registry  │                              │  (Argo Wf)   │                          │    GitHub    │
-    │             │── latest prod + canary ────▶│               │                          │  ArgoCD br.  │
-    ╰─────────────╯                              ╰──────────────╯                          │ Kserve/*.yaml│
-                                                                                            ╰──────┬───────╯
-                                                                                                   │  Argo CD watches
-                                                                                                   ▼
-                                                                                            ╭──────────────╮
-                                                                                            │   Argo CD    │
-                                                                                            │  reconciles  │
-                                                                                            ╰──────┬───────╯
-                                                                                                   │  applies
-                                                                                                   ▼
-                                                                                            ╭──────────────╮
-                                                                                            │    KServe    │
-                                                                                            │  Inference   │
-                                                                                            │   Service    │
-                                                                                            │ (new storage │
-                                                                                            │     URI)     │
-                                                                                            ╰──────────────╯
+   ╭─────────────╮                            ╭──────────────╮ 
+   │   MLflow    │◀── poll every 30 min ───── │   CD Cron    │  git commit + push ╭──────────────╮
+   │   registry  │                            │  (Argo Wf)   │───────────────────▶│    GitHub    │
+   │             │── latest prod + canary ───▶│              │                    │  ArgoCD br.  │
+   ╰─────────────╯                            ╰──────────────╯                    │ Kserve/*.yaml│
+                                                                                  ╰──────┬───────╯
+                                                                         Argo CD watches │  
+                                                                                         ▼
+                                                                                 ╭──────────────╮
+                                                                                 │   Argo CD    │
+                                                                                 │  reconciles  │
+                                                                                 ╰───-──┬-──────╯
+                                                                                applies │  
+                                                                                        ▼
+                                                                                 ╭──────────────╮
+                                                                                 │    KServe    │
+                                                                                 │  Inference   │
+                                                                                 │   Service    │
+                                                                                 │ (new storage │
+                                                                                 │     URI)     │
+                                                                                 ╰──────────────╯
 ```
 
 ### Inference request path
