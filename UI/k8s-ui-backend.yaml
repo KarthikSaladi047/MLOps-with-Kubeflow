@@ -18,11 +18,11 @@ spec:
     spec:
       nodeSelector:
         node-role.kubernetes.io/apps: "true"
-        tolerations:
-            - key: "dedicated"
-              operator: "Equal"
-              value: "apps"
-              effect: "NoSchedule"
+      tolerations:
+          - key: "dedicated"
+            operator: "Equal"
+            value: "apps"
+            effect: "NoSchedule"
       containers:
       - name: fastapi
         image: ghcr.io/karthiksaladi047/mlops-with-kubeflow/mlops-ui:8e5c356
