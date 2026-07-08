@@ -47,7 +47,7 @@ def prep_data(dataset: dsl.Output[dsl.Dataset]):
     base_image="python:3.10-slim",
     packages_to_install=[
         "packaging>=24.0",
-        "mlflow==3.14.0", 
+        "mlflow==2.10.2", 
         "boto3", 
         "transformers==4.37.1", 
         "torch==2.12.1", 
@@ -57,20 +57,26 @@ def prep_data(dataset: dsl.Output[dsl.Dataset]):
 )
 def train_and_register(dataset: dsl.Input[dsl.Dataset]):
     import os
+    import warnings
     import pandas as pd
     import torch
     import mlflow
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    from transformers import logging as hf_logging
     from torch.utils.data import TensorDataset, DataLoader
+    
+    # -----------------------------------------
+    # SILENCE ALL PYTHON WARNINGS
+    # -----------------------------------------
+    warnings.filterwarnings("ignore", category=FutureWarning, module="huggingface_hub")
+    hf_logging.set_verbosity_error()
+    os.environ["GIT_PYTHON_REFRESH"] = "quiet"
     
     # 1. Load Secrets
     os.environ["MLFLOW_TRACKING_URI"] = os.environ.get("MLFLOW_TRACKING_URI", "")
     os.environ["MLFLOW_S3_ENDPOINT_URL"] = os.environ.get("AWS_ENDPOINT_URL", "")
     os.environ["AWS_ACCESS_KEY_ID"] = os.environ.get("AWS_ACCESS_KEY_ID", "")
     os.environ["AWS_SECRET_ACCESS_KEY"] = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
-    
-    # FIX: Silence the MLflow missing-git warning
-    os.environ["GIT_PYTHON_REFRESH"] = "quiet"
     
     # 2. Load Data & Model
     df = pd.read_csv(dataset.path)
@@ -80,7 +86,6 @@ def train_and_register(dataset: dsl.Input[dsl.Dataset]):
     
     # 3. Prepare Data in Batches
     print("Tokenizing data and creating DataLoader...")
-    
     inputs = tokenizer(
         df['text'].tolist(), 
         padding=True, 
@@ -93,7 +98,7 @@ def train_and_register(dataset: dsl.Input[dsl.Dataset]):
     torch_dataset = TensorDataset(inputs['input_ids'], inputs['attention_mask'], labels)
     dataloader = DataLoader(torch_dataset, batch_size=16, shuffle=True)
     
-    # 4. The Training Loop
+    # 4. The True Training Loop
     optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
     model.train()
     
@@ -124,9 +129,11 @@ def train_and_register(dataset: dsl.Input[dsl.Dataset]):
         mlflow.log_metric("final_loss", avg_loss)
         
         components = {"model": model, "tokenizer": tokenizer}
+        
+        # FIX: Swapped 'artifact_path' for 'name' to satisfy MLflow API requirements
         mlflow.transformers.log_model(
             transformers_model=components,
-            artifact_path="model",
+            name="model",  
             task="text-classification", 
             registered_model_name="enterprise-text-classifier" 
         )
@@ -166,6 +173,9 @@ def mlops_pipeline():
         secret_key_to_env=secret_mapping
     )
     
+    # FIX: Silence the Pip warnings at the container level
+    train_task.set_env_variable(name="PIP_ROOT_USER_ACTION", value="ignore")
+    train_task.set_env_variable(name="PIP_DISABLE_PIP_VERSION_CHECK", value="1")
     train_task.set_caching_options(False)
 
 if __name__ == "__main__":
