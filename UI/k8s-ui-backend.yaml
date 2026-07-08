@@ -16,6 +16,13 @@ spec:
       labels:
         app: api-gateway
     spec:
+      nodeSelector:
+        node-role.kubernetes.io/apps: "true"
+        tolerations:
+            - key: "dedicated"
+              operator: "Equal"
+              value: "apps"
+              effect: "NoSchedule"
       containers:
       - name: fastapi
         image: ghcr.io/karthiksaladi047/mlops-with-kubeflow/mlops-ui:8e5c356
@@ -56,6 +63,13 @@ spec:
       labels:
         app: gradio-ui
     spec:
+      nodeSelector:
+        node-role.kubernetes.io/apps: "true"
+      tolerations:
+          - key: "dedicated"
+            operator: "Equal"
+            value: "apps"
+            effect: "NoSchedule"
       containers:
       - name: gradio
         image: ghcr.io/karthiksaladi047/mlops-with-kubeflow/mlops-ui:8e5c356

@@ -5,13 +5,20 @@ metadata:
   namespace: default
 spec:
   predictor:
+    nodeSelector:
+        node-role.kubernetes.io/apps: "true"
+        tolerations:
+            - key: "dedicated"
+              operator: "Equal"
+              value: "apps"
+              effect: "NoSchedule"
     serviceAccountName: kserve-sa
     model:
       modelFormat:
         name: mlflow
-      storageUri: s3://mlflow-artifacts/1/d655616c239542ef83d4e3997009f863/artifacts/model
+      storageUri: s3://mlflow-artifacts/1/fc49e86d81034e45a8f09764089d5f2d/artifacts/model
     canaryTrafficPercent: 10
     canary:
       modelFormat:
         name: mlflow
-      storageUri: s3://mlflow-artifacts/1/d655616c239542ef83d4e3997009f863/artifacts/model
+      storageUri: s3://mlflow-artifacts/1/fc49e86d81034e45a8f09764089d5f2d/artifacts/model
