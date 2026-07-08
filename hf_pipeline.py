@@ -47,7 +47,7 @@ def prep_data(dataset: dsl.Output[dsl.Dataset]):
     base_image="python:3.10-slim",
     packages_to_install=[
         "packaging>=24.0",
-        "mlflow==2.10.2", 
+        "mlflow==3.14.0", 
         "boto3", 
         "transformers==4.37.1", 
         "torch==2.12.1", 
