@@ -27,52 +27,152 @@ Each branch has its own README covering what lives there and how to work on it.
 
 ## Architecture at a glance
 
+The stack runs on a single Kubernetes cluster split into three node pools by
+role: **`infra`** (platform services), **`apps`** (user-facing endpoints), and
+**`compute`** (ephemeral training pods, tainted so nothing else lands on them).
+Data is versioned in DVC-backed MinIO, models are tracked and registered in
+MLflow, deployment state is reconciled from git by Argo CD, and Argo Workflows
+runs the two automation loops that connect them.
+
+### Cluster topology
+
 ```
-                        ┌────────────────────────────────────────────┐
-                        │                Kubernetes                  │
-                        │                                            │
-   git push (main)      │   ┌────────────┐   pulls repo, runs KFP    │
-   ────────────────────►│   │ Argo Cron  │──►┌────────────────────┐  │
-                        │   │  (CT job)  │   │ Kubeflow Pipelines │  │
-                        │   └────────────┘   │  prep_data (DVC)   │  │
-                        │                    │  train_and_register│  │
-                        │                    └─────────┬──────────┘  │
-                        │                              │             │
-                        │                              ▼             │
-                        │   ┌────────────┐   registers ┌──────────┐  │
-                        │   │   MinIO    │◄────────────│  MLflow  │  │
-                        │   │  (S3)      │  artifacts  │ tracking │  │
-                        │   │  buckets:  │             │+registry │  │
-                        │   │   dvc      │             └────┬─────┘  │
-                        │   │   mlflow   │                  │        │
-                        │   │   kserve   │                  ▼        │
-                        │   └─────┬──────┘        ┌───────────────┐  │
-                        │         │  storageUri   │  Argo Cron    │  │
-                        │         └──────────────►│  (CD job)     │  │
-                        │                         │  updates YAML │  │
-                        │                         │  on ArgoCD br │  │
-                        │                         └──────┬────────┘  │
-                        │                                │           │
-                        │                                ▼           │
-                        │                        ┌───────────────┐   │
-                        │                        │    Argo CD    │   │
-                        │                        │  reconciles   │   │
-                        │                        │  ArgoCD branch│   │
-                        │                        └──────┬────────┘   │
-                        │                               │            │
-                        │                               ▼            │
-                        │              ┌────────────────────────┐    │
-                        │              │  KServe InferenceSvc   │    │
-                        │              │  (mlflow runtime,      │    │
-                        │              │   canary + prod)       │    │
-                        │              └───────────┬────────────┘    │
-                        │                          │                 │
-                        │                          ▼                 │
-                        │              ┌────────────────────────┐    │
-   user → gradio ──────►│              │ FastAPI + Gradio (UI)  │    │
-                        │              │  built by UI branch CI │    │
-                        │              └────────────────────────┘    │
-                        └────────────────────────────────────────────┘
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                        K U B E R N E T E S   C L U S T E R                    ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+┌── infra pool ────────────────────────────────────────────────────────────────┐
+│  platform services  ·  nodeSelector = infra                                  │
+│                                                                              │
+│   ╭─────────────╮   ╭─────────────╮   ╭─────────────╮   ╭─────────────╮      │
+│   │    MinIO    │   │   MLflow    │   │  Argo CD    │   │  Argo Wf +  │      │
+│   │  (S3 API)   │◀──│ tracking +  │   │             │   │ Argo Events │      │
+│   │             │   │  registry   │   │ reconciles  │   │             │      │
+│   │ dvc-storage │   │             │   │  ArgoCD br  │   │  CT + CD    │      │
+│   │ mlflow-art. │   ╰──────┬──────╯   │             │   │  crons      │      │
+│   │ kserve-mod. │          │          ╰─────────────╯   ╰─────────────╯      │
+│   ╰─────────────╯          │  backend                                        │
+│                            ▼                                                 │
+│   ╭─────────────╮   ╭─────────────╮   ╭─────────────╮   ╭─────────────╮      │
+│   │   Sealed    │   │  Postgres   │   │  Kubeflow   │   │  Knative +  │      │
+│   │   Secrets   │   │  (mlflow    │   │  Pipelines  │   │  Istio +    │      │
+│   │             │   │   backend)  │   │             │   │ cert-manager│      │
+│   ╰─────────────╯   ╰─────────────╯   ╰─────────────╯   ╰─────────────╯      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌── apps pool ─────────────────────────────────────────────────────────────────┐
+│  user-facing  ·  nodeSelector = apps  ·  taint dedicated=apps:NoSchedule     │
+│                                                                              │
+│       user (browser)                                                         │
+│            │                                                                 │
+│            │ HTTP                                                            │
+│            ▼                                                                 │
+│      ╭─────────────╮      ╭──────────────╮      ╭──────────────╮             │
+│      │  gradio-ui  │─────▶│ api-gateway  │─────▶│    KServe    │             │
+│      │  (Gradio)   │ HTTP │  (FastAPI)   │  V2  │  Inference   │             │
+│      ╰─────────────╯      ╰──────────────╯      │   Service    │             │
+│                                                 │ ┌──────────┐ │             │
+│                                                 │ │ prod 90% │ │             │
+│                                                 │ ├──────────┤ │             │
+│                                                 │ │canary 10%│ │             │
+│                                                 │ └──────────┘ │             │
+│                                                 ╰──────────────╯             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌── compute pool ──────────────────────────────────────────────────────────────┐
+│  ephemeral KFP training pods  ·  taint dedicated=compute:NoSchedule          │
+│                                                                              │
+│         ╭──────────────╮                    ╭──────────────────────╮         │
+│         │  prep_data   │─── artifact ──────▶│  train_and_register  │         │
+│         │  (DVC pull   │                    │  (HF fine-tune +     │         │
+│         │  from MinIO) │                    │   log to MLflow)     │         │
+│         ╰──────────────╯                    ╰──────────────────────╯         │
+│                                                                              │
+│         spawned by Kubeflow Pipelines on schedule; deleted after each run    │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Continuous Training loop  (CT — every 30 min)
+
+A commit to `main` eventually becomes a new registered model version in MLflow.
+
+```
+      developer
+          │  git push (main)
+          ▼
+     ╭──────────╮     clone every 30 min     ╭──────────────╮
+     │  GitHub  │◀────────────────────────── │   CT Cron    │
+     │   main   │                            │  (Argo Wf)   │
+     ╰──────────╯                            ╰──────┬───────╯
+                                                    │ compile + submit
+                                                    ▼
+                                            ╭──────────────╮
+                                            │   Kubeflow   │
+                                            │   Pipelines  │
+                                            ╰──────┬───────╯
+                                                   │
+                    ┌──────────────────────────────┴─────────────────────────┐
+                    ▼                                                        ▼
+           ╭─────────────────╮                                    ╭─────────────────────╮
+           │    prep_data    │──── DVC pull ─────────────────────▶│        MinIO        │
+           │  (compute pod)  │◀── dataset.csv ────────────────────│    (dvc-storage)    │
+           ╰────────┬────────╯                                    ╰─────────────────────╯
+                    │  KFP artifact
+                    ▼
+           ╭────────────────────╮      register model    ╭─────────────────────╮
+           │ train_and_register │───────────────────────▶│       MLflow        │
+           │  (compute pod, HF) │      + artifact        │  registry + MinIO   │
+           ╰────────────────────╯───────────────────────▶╰─────────────────────╯
+```
+
+### Continuous Delivery loop  (CD — every 30 min)
+
+A promotion in the MLflow registry eventually becomes a rolled-out
+`InferenceService`.
+
+```
+    ╭─────────────╮                              ╭──────────────╮      git commit + push
+    │   MLflow    │◀── poll every 30 min ────── │   CD Cron    │─────────────────────────▶╭──────────────╮
+    │   registry  │                              │  (Argo Wf)   │                          │    GitHub    │
+    │             │── latest prod + canary ────▶│               │                          │  ArgoCD br.  │
+    ╰─────────────╯                              ╰──────────────╯                          │ Kserve/*.yaml│
+                                                                                            ╰──────┬───────╯
+                                                                                                   │  Argo CD watches
+                                                                                                   ▼
+                                                                                            ╭──────────────╮
+                                                                                            │   Argo CD    │
+                                                                                            │  reconciles  │
+                                                                                            ╰──────┬───────╯
+                                                                                                   │  applies
+                                                                                                   ▼
+                                                                                            ╭──────────────╮
+                                                                                            │    KServe    │
+                                                                                            │  Inference   │
+                                                                                            │   Service    │
+                                                                                            │ (new storage │
+                                                                                            │     URI)     │
+                                                                                            ╰──────────────╯
+```
+
+### Inference request path
+
+A click in the browser eventually becomes a scored sentiment.
+
+```
+                                                                             ╭──────────────╮
+                                                                             │    KServe    │
+   ╭─────────╮   HTTP    ╭─────────────╮   HTTP    ╭──────────────╮  V2 inf  │  Inference   │
+   │  user   │──────────▶│  gradio-ui  │──────────▶│ api-gateway  │─────────▶│   Service    │
+   │(browser)│◀──────────│  (Gradio)   │◀──────────│  (FastAPI)   │◀─────────│              │
+   ╰─────────╯  sentiment╰─────────────╯  scores   ╰──────────────╯          ╰──────┬───────╯
+                                                                                    │  pull artifact
+                                                                                    │  (first request)
+                                                                                    ▼
+                                                                             ╭──────────────╮
+                                                                             │    MinIO     │
+                                                                             │  (mlflow-    │
+                                                                             │  artifacts)  │
+                                                                             ╰──────────────╯
 ```
 
 ## End-to-end flow
