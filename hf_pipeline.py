@@ -14,7 +14,6 @@ def prep_data(dataset: dsl.Output[dsl.Dataset]):
     import subprocess
     import pandas as pd
     
-    # 1. Grab EVERYTHING using your exact uppercase Secret keys
     endpoint = os.environ.get("AWS_ENDPOINT_URL")
     key = os.environ.get("AWS_ACCESS_KEY_ID")
     secret = os.environ.get("AWS_SECRET_ACCESS_KEY")
@@ -23,22 +22,18 @@ def prep_data(dataset: dsl.Output[dsl.Dataset]):
     if not git_repo_url:
         raise ValueError("GIT_REPO_URL is missing from the environment variables!")
     
-    # 2. Clone the Git repository containing the .dvc pointer
     print(f"Cloning Git repository: {git_repo_url}...")
     subprocess.run(["git", "clone", git_repo_url, "/tmp/repo"], check=True)
     os.chdir("/tmp/repo")
     
-    # 3. Configure DVC to use the injected credentials dynamically
     print("Configuring DVC credentials...")
     subprocess.run(["dvc", "remote", "modify", "--local", "minio-remote", "endpointurl", endpoint], check=True)
     subprocess.run(["dvc", "remote", "modify", "--local", "minio-remote", "access_key_id", key], check=True)
     subprocess.run(["dvc", "remote", "modify", "--local", "minio-remote", "secret_access_key", secret], check=True)
     
-    # 4. Pull the heavy CSV file from MinIO using the .dvc pointer
     print("Pulling data from MinIO via DVC...")
     subprocess.run(["dvc", "pull"], check=True)
     
-    # 5. Read the downloaded CSV and pass it to KFP artifacts
     df = pd.read_csv("dataset.csv")
     print(f"Successfully loaded {len(df)} rows from DVC.")
     
@@ -51,7 +46,8 @@ def prep_data(dataset: dsl.Output[dsl.Dataset]):
 @dsl.component(
     base_image="python:3.10-slim",
     packages_to_install=[
-        "mlflow==2.10.2", 
+        "packaging>=24.0",
+        "mlflow==3.14.0", 
         "boto3", 
         "transformers==4.37.1", 
         "torch==2.12.1", 
@@ -72,7 +68,10 @@ def train_and_register(dataset: dsl.Input[dsl.Dataset]):
     os.environ["MLFLOW_S3_ENDPOINT_URL"] = os.environ.get("AWS_ENDPOINT_URL", "")
     os.environ["AWS_ACCESS_KEY_ID"] = os.environ.get("AWS_ACCESS_KEY_ID", "")
     os.environ["AWS_SECRET_ACCESS_KEY"] = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
-
+    
+    # FIX: Silence the MLflow missing-git warning
+    os.environ["GIT_PYTHON_REFRESH"] = "quiet"
+    
     # 2. Load Data & Model
     df = pd.read_csv(dataset.path)
     model_name = "prajjwal1/bert-tiny" 
@@ -81,14 +80,20 @@ def train_and_register(dataset: dsl.Input[dsl.Dataset]):
     
     # 3. Prepare Data in Batches
     print("Tokenizing data and creating DataLoader...")
-    inputs = tokenizer(df['text'].tolist(), padding=True, truncation=True, return_tensors="pt")
+    
+    inputs = tokenizer(
+        df['text'].tolist(), 
+        padding=True, 
+        truncation=True, 
+        max_length=512, 
+        return_tensors="pt"
+    )
     labels = torch.tensor(df['label'].tolist())
     
     torch_dataset = TensorDataset(inputs['input_ids'], inputs['attention_mask'], labels)
-    # Feed data in chunks of 16 sentences at a time
     dataloader = DataLoader(torch_dataset, batch_size=16, shuffle=True)
     
-    # 4. The True Training Loop
+    # 4. The Training Loop
     optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
     model.train()
     
@@ -137,7 +142,6 @@ def train_and_register(dataset: dsl.Input[dsl.Dataset]):
 def mlops_pipeline():
     from kfp import kubernetes
     
-    # Map the exact uppercase keys from your Kubernetes secret to identical environment variables
     secret_mapping = {
         "MLFLOW_TRACKING_URI": "MLFLOW_TRACKING_URI",
         "AWS_ENDPOINT_URL": "AWS_ENDPOINT_URL", 
