@@ -16,9 +16,9 @@ spec:
     model:
       modelFormat:
         name: mlflow
-      storageUri: s3://mlflow-artifacts/1/fc49e86d81034e45a8f09764089d5f2d/artifacts/model
+      storageUri: s3://mlflow-artifacts/1/a81810ae2fe843ddadd506fbfa874ce0/artifacts/model
     canaryTrafficPercent: 10
     canary:
       modelFormat:
         name: mlflow
-      storageUri: s3://mlflow-artifacts/1/fc49e86d81034e45a8f09764089d5f2d/artifacts/model
+      storageUri: s3://mlflow-artifacts/1/a81810ae2fe843ddadd506fbfa874ce0/artifacts/model
