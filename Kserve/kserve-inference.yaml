@@ -6,12 +6,12 @@ metadata:
 spec:
   predictor:
     nodeSelector:
-      node-role.kubernetes.io/apps: "true"
+      node-role.kubernetes.io/apps: 'true'
     tolerations:
-      - key: "dedicated"
-        operator: "Equal"
-        value: "apps"
-        effect: "NoSchedule"
+    - key: dedicated
+      operator: Equal
+      value: apps
+      effect: NoSchedule
     serviceAccountName: kserve-sa
     model:
       modelFormat:
@@ -21,4 +21,4 @@ spec:
     canary:
       modelFormat:
         name: mlflow
-      storageUri: s3://mlflow-artifacts/1/a81810ae2fe843ddadd506fbfa874ce0/artifacts/model
+      storageUri: models:/enterprise-text-classifier/1
