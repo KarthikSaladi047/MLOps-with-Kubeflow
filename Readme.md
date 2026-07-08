@@ -14,6 +14,19 @@ cd MLOps-with-Kubeflow
 git checkout Infra-Setup
 ```
 
+## Quick start — interactive installer
+
+If you'd rather not run each command by hand, use the bundled installer.
+It prompts for every required value, previews them for approval, then
+executes every section below in order:
+
+```bash
+./install.sh
+```
+
+The manual steps that follow document exactly what the script does and remain
+the source of truth if you want to install piecemeal or debug a failure.
+
 ---
 
 ## Prerequisites
@@ -353,33 +366,11 @@ kubectl apply -f argo-workflows/cd-cronworkflow.yaml
 
 ---
 
-## 11. Register the Argo CD Applications
-
-These make Argo CD reconcile the `Kserve/` and `UI/` folders from the
-[`ArgoCD` branch](https://github.com/KarthikSaladi047/MLOps-with-Kubeflow/tree/ArgoCD)
-of this repo — the KServe `InferenceService` and the FastAPI + Gradio UI.
-
-Before applying, **edit both files** to point `repoURL` at your fork if you're
-not using the upstream repo:
-
-- [argo-apps/argo-kserve-app.yaml](argo-apps/argo-kserve-app.yaml)
-- [argo-apps/argo-ui-app.yaml](argo-apps/argo-ui-app.yaml)
-
-Then:
-
-```bash
-kubectl apply -f argo-apps/argo-kserve-app.yaml
-kubectl apply -f argo-apps/argo-ui-app.yaml
-```
-
----
-
 ## Verifying the stack
 
 ```bash
 kubectl get pods -A | grep -E 'minio|mlflow|argocd|argo-events|kserve|knative|kubeflow|sealed-secrets|cert-manager'
 kubectl -n kubeflow get cronworkflow
-kubectl -n argocd    get applications
 ```
 
 Access the UIs via their NodePorts:
