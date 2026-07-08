@@ -21,4 +21,4 @@ spec:
     canary:
       modelFormat:
         name: mlflow
-      storageUri: models:/enterprise-text-classifier/1
+      storageUri: s3://mlflow-artifacts/1/models/m-e1ad962238c04b7a8c4def9cdf49d6de/artifacts
