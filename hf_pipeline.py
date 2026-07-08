@@ -128,7 +128,7 @@ def train_and_register(dataset: dsl.Input[dsl.Dataset]):
             transformers_model=components,
             artifact_path="model",
             task="text-classification", 
-            registered_model_name="cpu-tiny-classifier" 
+            registered_model_name="enterprise-text-classifier" 
         )
         print("Success! Smart model is now in the Registry.")
 
