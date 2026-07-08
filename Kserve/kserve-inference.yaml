@@ -6,12 +6,12 @@ metadata:
 spec:
   predictor:
     nodeSelector:
-        node-role.kubernetes.io/apps: "true"
-        tolerations:
-            - key: "dedicated"
-              operator: "Equal"
-              value: "apps"
-              effect: "NoSchedule"
+      node-role.kubernetes.io/apps: "true"
+    tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "apps"
+        effect: "NoSchedule"
     serviceAccountName: kserve-sa
     model:
       modelFormat:
