@@ -25,7 +25,7 @@ spec:
             effect: "NoSchedule"
       containers:
       - name: fastapi
-        image: ghcr.io/karthiksaladi047/mlops-with-kubeflow/mlops-ui:8e5c356
+        image: ghcr.io/karthiksaladi047/mlops-with-kubeflow/mlops-ui:eae5c75
         # Tell Kubernetes to boot the FastAPI server
         command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
         ports:
@@ -72,7 +72,7 @@ spec:
             effect: "NoSchedule"
       containers:
       - name: gradio
-        image: ghcr.io/karthiksaladi047/mlops-with-kubeflow/mlops-ui:8e5c356
+        image: ghcr.io/karthiksaladi047/mlops-with-kubeflow/mlops-ui:eae5c75
         # Tell Kubernetes to boot the Gradio server
         command: ["python3", "gradio_app.py"]
         env:
