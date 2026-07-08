@@ -1,1 +1,10 @@
-/dataset.csv
+# Raw (unencrypted) secret manifests — never commit these.
+# Always seal them with `kubeseal` before applying and commit only the *-sealed.yaml result.
+*-raw.yaml
+*-raw.yml
+
+# Local editor / OS noise
+.DS_Store
+.vscode/
+.idea/
+*.swp

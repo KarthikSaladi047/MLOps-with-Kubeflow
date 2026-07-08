@@ -1,0 +1,126 @@
+# Not implemented this because the mlflow webhook need the endpoint to be https. But this is a internal cluster setup. setting up a valid SSL certificate and a reverse HTTPS proxy just for this one local webhook is going to be a massive, unnecessary headache of self-signed certificates and CA bundles.
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: mlflow-sensor
+  namespace: kubeflow
+spec:
+  dependencies:
+    - name: mlflow-dep
+      eventSourceName: mlflow-event-source
+      eventName: mlflow-webhook
+  triggers:
+    - template:
+        name: cd-workflow-trigger
+        k8s:
+          operation: create
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: instant-cd-run-
+                namespace: kubeflow
+              spec:
+                nodeSelector:
+                  node-role.kubernetes.io/infra: "true"
+                entrypoint: trigger-cd
+                serviceAccountName: pipeline-runner
+                templates:
+                  - name: trigger-cd
+                    container:
+                      image: python:3.10
+                      env:
+                      - name: GITHUB_TOKEN
+                        valueFrom:
+                          secretKeyRef:
+                            name: infra-credentials
+                            key: GITHUB_TOKEN
+                      - name: MLFLOW_TRACKING_URI
+                        valueFrom:
+                          secretKeyRef:
+                            name: infra-credentials
+                            key: MLFLOW_TRACKING_URI
+                      command: ["/bin/bash", "-c"]
+                      args:
+                        - |
+                          set -e
+                          export GIT_TERMINAL_PROMPT=0
+                          pip install --quiet --no-cache-dir mlflow==2.10.2 pyyaml requests
+                          
+                          git clone https://github.com/KarthikSaladi047/MLOps-with-Kubeflow.git /tmp/repo
+                          cd /tmp/repo
+                          git checkout ArgoCD
+                          
+                          cat << 'EOF' > sync.py
+                          import yaml
+                          import sys
+                          import os
+                          from mlflow.tracking import MlflowClient
+                          
+                          TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI")
+                          client = MlflowClient(tracking_uri=TRACKING_URI)
+                          
+                          CANARY_MODEL = "enterprise-text-classifier-canary"
+                          PROD_MODEL = "enterprise-text-classifier-production"
+                          
+                          def get_latest_uri(model_name):
+                              try:
+                                  # Fetch the latest versions of the registered model
+                                  versions = client.get_latest_versions(model_name)
+                                  if versions:
+                                      # Grab the absolute latest version number
+                                      latest_version = max(versions, key=lambda v: int(v.version))
+                                      return latest_version.source
+                              except Exception as e:
+                                  print(f"Model {model_name} not found or has no versions.")
+                                  return None
+                              return None
+                          
+                          canary_uri = get_latest_uri(CANARY_MODEL)
+                          prod_uri = get_latest_uri(PROD_MODEL)
+                          
+                          if not prod_uri and not canary_uri:
+                              print("No prod or canary models found. Skipping update.")
+                              open("SKIP_UPDATE", "w").close()
+                              sys.exit(0)
+                          
+                          manifest_path = "Kserve/kserve-inference.yaml"
+                          with open(manifest_path, "r") as f:
+                              manifest = yaml.safe_load(f)
+                          
+                          # 1. Update Production if it exists
+                          if prod_uri:
+                              manifest["spec"]["predictor"]["model"]["storageUri"] = prod_uri
+                              
+                          # 2. Handle Canary Logic
+                          if canary_uri:
+                              manifest["spec"]["predictor"]["canaryTrafficPercent"] = 10
+                              manifest["spec"]["predictor"]["canary"] = {
+                                  "modelFormat": {"name": "mlflow"},
+                                  "storageUri": canary_uri
+                              }
+                          else:
+                              # If the canary registry is empty or deleted, route 100% to prod
+                              manifest["spec"]["predictor"].pop("canaryTrafficPercent", None)
+                              manifest["spec"]["predictor"].pop("canary", None)
+                              
+                          with open(manifest_path, "w") as f:
+                              yaml.dump(manifest, f, default_flow_style=False, sort_keys=False)
+                          EOF
+                          
+                          python3 sync.py
+                          
+                          if [ -f "SKIP_UPDATE" ]; then
+                            exit 0
+                          fi
+                          
+                          git config --global user.name "gitops-bot"
+                          git config --global user.email "bot@mlops.local"
+                          git remote set-url origin "https://KarthikSaladi047:${GITHUB_TOKEN}@github.com/KarthikSaladi047/MLOps-with-Kubeflow.git"
+                          git add Kserve/kserve-inference.yaml
+                          
+                          if ! git diff --cached --quiet; then
+                            git commit -m "GitOps: Event-driven KServe sync for enterprise-text-classifier"
+                            git push origin ArgoCD
+                          fi

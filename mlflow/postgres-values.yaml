@@ -1,0 +1,26 @@
+architecture: standalone
+
+auth:
+  username: mlflow_user
+  database: mlflow
+  existingSecret: postgres-secret
+
+primary:
+  persistence:
+    enabled: true
+    storageClass: px-fa-direct-access
+    size: 50Gi
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+  nodeSelector:
+    node-role.kubernetes.io/infra: "true"
+
+volumePermissions:
+  enabled: true

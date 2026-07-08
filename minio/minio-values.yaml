@@ -1,0 +1,28 @@
+# Use your newly formatted Secret
+existingSecret: "minio-creds"
+
+# Mounts to your existing Portworx storage
+persistence:
+  enabled: true
+  storageClass: "px-fa-direct-access"
+  size: 100Gi
+
+# Automatically provisions your ML buckets
+buckets:
+  - name: dvc-storage
+    policy: none
+  - name: mlflow-artifacts
+    policy: none
+  - name: kserve-models
+    policy: none
+
+resources:
+  requests:
+    memory: 2Gi
+    cpu: 500m
+
+nodeSelector:
+        node-role.kubernetes.io/infra: "true"
+
+consoleService:
+  type: NodePort

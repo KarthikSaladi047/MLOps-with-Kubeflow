@@ -1,0 +1,109 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: continuous-delivery-job
+  namespace: kubeflow
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: "Forbid"
+  startingDeadlineSeconds: 0
+  workflowSpec:
+    entrypoint: sync-pipeline
+    templates:
+      - name: sync-pipeline
+        container:
+          image: python:3.10-slim
+          env:
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: infra-credentials
+                  key: GITHUB_TOKEN
+            - name: MLFLOW_TRACKING_URI
+              valueFrom:
+                secretKeyRef:
+                  name: infra-credentials
+                  key: MLFLOW_TRACKING_URI
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -e
+              export GIT_TERMINAL_PROMPT=0
+              
+              # Install required system tools and Python libraries
+              apt-get update && apt-get install -y git
+              pip install --quiet --no-cache-dir mlflow==3.14.0 pyyaml requests
+              
+              # 1. Clone your repository
+              git clone https://github.com/KarthikSaladi047/MLOps-with-Kubeflow.git /tmp/repo
+              cd /tmp/repo
+              git checkout ArgoCD
+              
+              # 2. Inline Python script to check MLflow and update KServe spec
+              cat << 'EOF' > sync.py
+              import yaml
+              import sys
+              import os
+              from mlflow.tracking import MlflowClient
+              
+              client = MlflowClient(tracking_uri=os.environ.get("MLFLOW_TRACKING_URI"))
+              CANARY_MODEL = "enterprise-text-classifier-canary"
+              PROD_MODEL = "enterprise-text-classifier-production"
+              
+              def get_latest_uri(model_name):
+                  try:
+                      versions = client.get_latest_versions(model_name)
+                      if versions:
+                          latest = max(versions, key=lambda v: int(v.version))
+                          # 🚨 THE FIX: Ask MLflow to resolve the absolute S3/MinIO path!
+                          return client.get_model_version_download_uri(latest.name, latest.version)
+                  except:
+                      return None
+                  return None
+              
+              canary_uri = get_latest_uri(CANARY_MODEL)
+              prod_uri = get_latest_uri(PROD_MODEL)
+              
+              if not prod_uri and not canary_uri:
+                  print("No models found in registries.")
+                  exit(0)
+              
+              manifest_path = "Kserve/kserve-inference.yaml"
+              with open(manifest_path, "r") as f:
+                  manifest = yaml.safe_load(f)
+              
+              # Update Production block
+              if prod_uri:
+                  manifest["spec"]["predictor"]["model"]["storageUri"] = prod_uri
+                  
+              # Update Canary block
+              if canary_uri:
+                  manifest["spec"]["predictor"]["canaryTrafficPercent"] = 10
+                  manifest["spec"]["predictor"]["canary"] = {
+                      "modelFormat": {"name": "mlflow"},
+                      "storageUri": canary_uri
+                  }
+              else:
+                  manifest["spec"]["predictor"].pop("canaryTrafficPercent", None)
+                  manifest["spec"]["predictor"].pop("canary", None)
+                  
+              with open(manifest_path, "w") as f:
+                  yaml.dump(manifest, f, default_flow_style=False, sort_keys=False)
+              EOF
+              
+              # 3. Execute sync script
+              python3 sync.py
+              
+              # 4. Check for state differences, then conditionally commit and push
+              git config --global user.name "gitops-bot"
+              git config --global user.email "bot@mlops.local"
+              git remote set-url origin "https://KarthikSaladi047:${GITHUB_TOKEN}@github.com/KarthikSaladi047/MLOps-with-Kubeflow.git"
+              git add Kserve/kserve-inference.yaml
+              
+              if ! git diff --cached --quiet; then
+                git commit -m "GitOps: Automated KServe sync from MLflow promotion"
+                git push origin ArgoCD
+                echo "✅ Changes detected and successfully pushed to Git!"
+              else
+                echo "💤 Manifest matches registry state. No changes to push."
+              fi

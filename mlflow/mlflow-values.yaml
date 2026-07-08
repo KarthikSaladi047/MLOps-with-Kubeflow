@@ -1,0 +1,30 @@
+mlflow:
+  backendStoreUriFrom:
+    secretKeyRef:
+      name: postgres-secret
+      key: mlflow-uri
+  defaultArtifactRoot: "s3://mlflow-artifacts"
+
+env:
+  - name: MLFLOW_SERVER_ALLOWED_HOSTS
+    value: "*" # not recommended for production
+  - name: MLFLOW_SERVER_CORS_ALLOWED_ORIGINS
+    value: "*"
+  - name: AWS_ACCESS_KEY_ID
+    valueFrom:
+      secretKeyRef:
+        name: minio-creds
+        key: rootUser
+  - name: AWS_SECRET_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: minio-creds
+        key: rootPassword
+  - name: AWS_ENDPOINT_URL
+    value: http://minio.minio.svc.cluster.local:9000
+
+service:
+  type: NodePort
+
+nodeSelector:
+        node-role.kubernetes.io/infra: "true"

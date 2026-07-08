@@ -1,0 +1,107 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: continuous-training-job
+  namespace: kubeflow 
+spec:
+  schedule: "*/30 * * * *" 
+  concurrencyPolicy: "Replace"
+  startingDeadlineSeconds: 0
+  workflowSpec:
+    entrypoint: trigger-ct
+    serviceAccountName: pipeline-runner 
+    templates:
+    - name: trigger-ct
+      container:
+        env:
+        - name: GIT_REPO_URL
+          valueFrom:
+            secretKeyRef:
+              name: infra-credentials
+              key: GIT_REPO_URL
+        image: python:3.10
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            set -e
+            export GIT_TERMINAL_PROMPT=0
+            pip install --quiet --no-cache-dir kfp==2.* kfp-kubernetes
+
+            git clone --depth 1 --branch main $GIT_REPO_URL /tmp/repo
+            cd /tmp/repo
+
+            export GIT_SHA=$(git rev-parse --short HEAD)
+            echo "Latest commit on main is: $GIT_SHA"
+
+            python3 hf_pipeline.py
+
+            cat << 'EOF' > submit.py
+            import kfp
+            import os
+            import sys
+
+            GIT_SHA = os.environ["GIT_SHA"]
+            RUN_NAME_PREFIX = f"gitops-training-{GIT_SHA}"
+            EXPERIMENT_NAME = "continuous-training"
+            MAX_ATTEMPTS = 3
+            ACTIVE_STATES = {"PENDING", "RUNNING", "PAUSED", "CANCELING"}
+
+            client = kfp.Client(host="http://ml-pipeline.kubeflow.svc.cluster.local:8888")
+
+            try:
+                experiment = client.get_experiment(experiment_name=EXPERIMENT_NAME, namespace='kubeflow')
+            except ValueError:
+                print(f"Experiment '{EXPERIMENT_NAME}' not found. Creating it now...")
+                experiment = client.create_experiment(EXPERIMENT_NAME, namespace='kubeflow')
+
+            def get_runs_for_commit():
+                runs = []
+                page_token = ""
+                while True:
+                    response = client.list_runs(
+                        experiment_id=experiment.experiment_id,
+                        page_token=page_token,
+                        page_size=100,
+                    )
+                    for r in (response.runs or []):
+                        if r.display_name and r.display_name.startswith(RUN_NAME_PREFIX):
+                            runs.append(r)
+                    page_token = response.next_page_token
+                    if not page_token:
+                        return runs
+
+            existing = get_runs_for_commit()
+            succeeded, active, failed = [], [], []
+            for r in existing:
+                state = (getattr(r, "state", "") or "").upper()
+                if state == "SUCCEEDED":
+                    succeeded.append(r)
+                elif state in ACTIVE_STATES:
+                    active.append(r)
+                else:
+                    failed.append(r)
+
+            if succeeded:
+                print(f"✅ Run for {GIT_SHA} already succeeded. Nothing to do.")
+                sys.exit(0)
+
+            if active:
+                print(f"⏳ Run for {GIT_SHA} is still active ({len(active)} in-flight). Waiting.")
+                sys.exit(0)
+
+            if len(failed) >= MAX_ATTEMPTS:
+                print(f"🛑 Run for {GIT_SHA} failed {len(failed)} times (max: {MAX_ATTEMPTS}). Not retrying.")
+                sys.exit(0)
+
+            attempt = len(failed) + 1
+            run_name = f"{RUN_NAME_PREFIX}-attempt-{attempt}"
+            print(f"🚀 Submitting {run_name} to Kubeflow (attempt {attempt}/{MAX_ATTEMPTS})...")
+            client.create_run_from_pipeline_package(
+                pipeline_file='hf_pipeline.yaml',
+                run_name=run_name,
+                experiment_name=EXPERIMENT_NAME,
+                namespace='kubeflow'
+            )
+            EOF
+
+            python3 submit.py

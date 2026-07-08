@@ -1,0 +1,65 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - github.com/kubeflow/pipelines/manifests/kustomize/env/cert-manager/platform-agnostic-k8s-native?ref=2.16.1
+
+patches:
+  # 1. Route all KFP Controllers & DBs to the Infra Nodes
+  - target:
+      kind: Deployment
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: wildcard
+      spec:
+        template:
+          spec:
+            nodeSelector:
+              node-role.kubernetes.io/infra: "true"
+              
+  - target:
+      kind: StatefulSet
+    patch: |-
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: wildcard
+      spec:
+        template:
+          spec:
+            nodeSelector:
+              node-role.kubernetes.io/infra: "true"
+
+  # 2. Expose the KFP UI as a NodePort
+  - target:
+      kind: Service
+      name: ml-pipeline-ui
+    patch: |-
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: ml-pipeline-ui
+      spec:
+        type: NodePort
+
+  # 3. Route all KFP/Argo pipeline runs to the tainted Compute Nodes
+  - target:
+      kind: ConfigMap
+      name: workflow-controller-configmap
+    patch: |-
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: workflow-controller-configmap
+      data:
+        workflowDefaults: |
+          spec:
+            nodeSelector:
+              node-role.kubernetes.io/compute: "true"
+            tolerations:
+            - key: "dedicated"
+              operator: "Equal"
+              value: "compute"
+              effect: "NoSchedule"

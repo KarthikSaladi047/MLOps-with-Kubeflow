@@ -1,0 +1,29 @@
+apiVersion: serving.kserve.io/v1alpha1
+kind: ClusterServingRuntime
+metadata:
+  name: kserve-mlflow-runtime
+spec:
+  supportedModelFormats:
+    - name: mlflow
+      autoSelect: true
+  containers:
+    - name: kserve-container
+      image: seldonio/mlserver:1.5.0-mlflow
+      command: ["/bin/bash", "-c"]
+      # Install the required Hugging Face & PyTorch libraries, then start the server
+      args:
+        - "pip install torch==2.12.1 torchvision==0.27.1 transformers==4.37.1 && mlserver start /mnt/models"
+      env:
+        - name: MLSERVER_MODEL_IMPLEMENTATION
+          value: "mlserver_mlflow.MLflowRuntime"
+        - name: MLSERVER_MODEL_NAME
+          value: "{{.Name}}"
+        - name: MLSERVER_MODEL_URI
+          value: "/mnt/models"
+        - name: MLSERVER_HTTP_PORT
+          value: "8080"
+        - name: MLSERVER_GRPC_PORT
+          value: "9000"
+      ports:
+        - containerPort: 8080
+          protocol: TCP
