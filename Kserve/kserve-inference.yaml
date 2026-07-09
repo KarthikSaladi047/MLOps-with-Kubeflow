@@ -21,4 +21,4 @@ spec:
     canary:
       modelFormat:
         name: mlflow
-      storageUri: s3://mlflow-artifacts/1/models/m-e1ad962238c04b7a8c4def9cdf49d6de/artifacts
+      storageUri: s3://mlflow-artifacts/1/models/m-4ddc29bf22d84b3abc11fdf77b5255b0/artifacts
