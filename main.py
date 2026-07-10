@@ -9,7 +9,6 @@ app = FastAPI(
     description="Middleware connecting frontend clients to the KServe ML backend."
 )
 
-# KServe internal cluster URL (using the exact one from your earlier curl command)
 KSERVE_URL = os.getenv(
     "KSERVE_URL", 
     "http://huggingface-classifier.default.svc.cluster.local/v2/models/huggingface-classifier/infer"
