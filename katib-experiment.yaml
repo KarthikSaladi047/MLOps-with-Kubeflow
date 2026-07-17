@@ -1,0 +1,187 @@
+apiVersion: kubeflow.org/v1beta1
+kind: Experiment
+metadata:
+  name: hf-text-classifier-tuning
+  namespace: kubeflow
+spec:
+  # 1. The Optimization Goal
+  objective:
+    type: minimize
+    goal: 0.0001
+    objectiveMetricName: final_loss
+  
+  # 2. The Search Algorithm (Bayesian Optimization)
+  algorithm:
+    algorithmName: bayesianoptimization
+  
+  # 3. Parallelism and Trial Limits
+  parallelTrialCount: 3
+  maxTrialCount: 6
+  maxFailedTrialCount: 2
+  
+  # 4. The Hyperparameter Search Space
+  parameters:
+    - name: learning_rate
+      parameterType: double
+      feasibleSpace:
+        min: "1e-5"
+        max: "1e-4"
+    - name: batch_size
+      parameterType: int
+      feasibleSpace:
+        min: "8"
+        max: "32"
+        step: "8"
+        
+  # 5. The Trial Pod Template
+  trialTemplate:
+    primaryContainerName: training-container
+    trialParameters:
+      - name: learningRate
+        description: Learning rate for the model
+        reference: learning_rate
+      - name: batchSize
+        description: Batch size for training
+        reference: batch_size
+    trialSpec:
+      apiVersion: batch/v1
+      kind: Job
+      spec:
+        template:
+          spec:
+            # 🚨 EXACT HARDWARE ROUTING TO COMPUTE NODES 🚨
+            nodeSelector:
+              node-role.kubernetes.io/compute: "true"
+            tolerations:
+            - key: "dedicated"
+              operator: "Equal"
+              value: "compute"
+              effect: "NoSchedule"
+            restartPolicy: Never
+            
+            # 1. Create a shared volume to pass the script
+            volumes:
+              - name: workspace
+                emptyDir: {}
+                
+            # 2. Use an InitContainer to write the script safely
+            initContainers:
+              - name: script-writer
+                image: python:3.10-slim
+                envFrom:
+                  - secretRef:
+                      name: infra-credentials
+                volumeMounts:
+                  - name: workspace
+                    mountPath: /workspace
+                command:
+                  - "/bin/sh"
+                  - "-c"
+                  - |
+                    cat << 'EOF' > /workspace/train.py
+                    import argparse
+                    import os
+                    import warnings
+                    import subprocess
+                    
+                    # 🚨 STEP 1: Install ONLY data pulling dependencies first
+                    print("📦 Installing DVC and data preparation tools...")
+                    subprocess.run(["pip", "install", "--quiet", "--no-cache-dir", "pandas", "dvc[s3]"], check=True)
+                    
+                    # --- DVC DATA PULL LOGIC ---
+                    print("⚙️ Setting up system tools and cloning repository...")
+                    git_repo = os.environ.get("GIT_REPO_URL")
+                    subprocess.run(["apt-get", "update"], check=True)
+                    subprocess.run(["apt-get", "install", "-y", "git"], check=True)
+                    subprocess.run(["git", "clone", git_repo, "/tmp/repo"], check=True)
+                    os.chdir("/tmp/repo")
+                    
+                    print("🚚 Pulling dataset via DVC...")
+                    subprocess.run(["dvc", "remote", "modify", "--local", "minio-remote", "endpointurl", os.environ.get("AWS_ENDPOINT_URL")], check=True)
+                    subprocess.run(["dvc", "remote", "modify", "--local", "minio-remote", "access_key_id", os.environ.get("AWS_ACCESS_KEY_ID")], check=True)
+                    subprocess.run(["dvc", "remote", "modify", "--local", "minio-remote", "secret_access_key", os.environ.get("AWS_SECRET_ACCESS_KEY")], check=True)
+                    subprocess.run(["dvc", "pull"], check=True)
+                    
+                    # Move data to workspace before installing heavy ML libraries
+                    import shutil
+                    shutil.copy("dataset.csv", "/workspace/dataset.csv")
+                    os.chdir("/workspace")
+                    
+                    # 🚨 STEP 2: Install ML dependencies separately to prevent backtracking loops
+                    print("🚀 Installing ML Frameworks (MLflow, Torch, Transformers)...")
+                    subprocess.run(["pip", "install", "--quiet", "--no-cache-dir", "mlflow==2.10.2", "boto3", "transformers==4.37.1", "torch==2.12.1", "torchvision==0.27.1"], check=True)
+                    
+                    import pandas as pd
+                    import torch
+                    import mlflow
+                    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+                    from transformers import logging as hf_logging
+                    from torch.utils.data import TensorDataset, DataLoader
+                    
+                    # Silence warnings
+                    warnings.filterwarnings("ignore", category=FutureWarning, module="huggingface_hub")
+                    hf_logging.set_verbosity_error()
+                    os.environ["GIT_PYTHON_REFRESH"] = "quiet"
+                    
+                    # Parse Katib arguments
+                    parser = argparse.ArgumentParser()
+                    parser.add_argument("--learning_rate", type=float, required=True)
+                    parser.add_argument("--batch_size", type=int, required=True)
+                    args = parser.parse_args()
+                    
+                    df = pd.read_csv("dataset.csv")
+                    
+                    # --- TRAINING LOGIC ---
+                    model_name = "prajjwal1/bert-tiny"
+                    tokenizer = AutoTokenizer.from_pretrained(model_name)
+                    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
+                    
+                    inputs = tokenizer(df['text'].tolist(), padding=True, truncation=True, max_length=512, return_tensors="pt")
+                    labels = torch.tensor(df['label'].tolist())
+                    
+                    torch_dataset = TensorDataset(inputs['input_ids'], inputs['attention_mask'], labels)
+                    dataloader = DataLoader(torch_dataset, batch_size=args.batch_size, shuffle=True)
+                    
+                    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
+                    model.train()
+                    
+                    epochs = 3
+                    for epoch in range(epochs):
+                        total_loss = 0
+                        for batch in dataloader:
+                            b_input_ids, b_mask, b_labels = batch
+                            optimizer.zero_grad()
+                            outputs = model(input_ids=b_input_ids, attention_mask=b_mask, labels=b_labels)
+                            loss = outputs.loss
+                            loss.backward()
+                            optimizer.step()
+                            total_loss += loss.item()
+                        avg_loss = total_loss / len(dataloader)
+                    
+                    # Log to MLflow
+                    mlflow.set_experiment("katib-hyperparameter-tuning")
+                    with mlflow.start_run():
+                        mlflow.log_param("learning_rate", args.learning_rate)
+                        mlflow.log_param("batch_size", args.batch_size)
+                        mlflow.log_metric("final_loss", avg_loss)
+                    
+                    # Print for Katib Metrics Collector
+                    print(f"final_loss={avg_loss}")
+                    EOF
+            
+            # 3. The Primary Container running cleanly
+            containers:
+              - name: training-container
+                image: python:3.10-slim
+                workingDir: /workspace
+                volumeMounts:
+                  - name: workspace
+                    mountPath: /workspace
+                envFrom:
+                  - secretRef:
+                      name: infra-credentials
+                command:
+                  - "python3"
+                  - "train.py"
+                  - "--learning_rate=${trialParameters.learningRate}"
+                  - "--batch_size=${trialParameters.batchSize}"
