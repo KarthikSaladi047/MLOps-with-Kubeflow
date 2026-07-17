@@ -304,7 +304,7 @@ helm install argo-events argo/argo-events \
 
 ---
 
-## 9. Install Kubeflow Pipelines (KFP) + infra credentials
+## 9. Install Kubeflow Pipelines (KFP) + Katib + infra credentials
 
 Install the cluster-scoped resources first, then the kustomization in this repo.
 
@@ -315,6 +315,10 @@ kubectl apply -k "github.com/kubeflow/pipelines/manifests/kustomize/cluster-scop
 kubectl wait --for=condition=established --timeout=60s crd/applications.app.k8s.io
 
 kubectl apply -k kubeflow-Pipelines/
+```
+
+```bash
+kubectl apply -k "github.com/kubeflow/katib.git/manifests/v1beta1/installs/katib-standalone?ref=v0.17.0"
 ```
 
 Now create the credentials that the Argo Workflows (step 10) and the training
